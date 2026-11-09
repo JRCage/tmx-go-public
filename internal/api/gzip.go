@@ -15,15 +15,32 @@ func gzipped(h http.HandlerFunc) http.HandlerFunc {
 			h(w, r)
 			return
 		}
-		addVaryAcceptEncoding(w.Header())
+		vw := &varyWriter{ResponseWriter: w}
+		defer addVaryAcceptEncoding(vw.Header())
 		if !acceptsGzip(r) {
-			h(w, r)
+			h(vw, r)
 			return
 		}
-		gw := &gzipWriter{ResponseWriter: w}
+		gw := &gzipWriter{ResponseWriter: vw}
 		defer gw.close()
 		h(gw, r)
 	}
+}
+
+// varyWriter adds cache variation just before response headers are committed,
+// after the wrapped handler has had a chance to set its own Vary values.
+type varyWriter struct {
+	http.ResponseWriter
+}
+
+func (v *varyWriter) WriteHeader(code int) {
+	addVaryAcceptEncoding(v.Header())
+	v.ResponseWriter.WriteHeader(code)
+}
+
+func (v *varyWriter) Write(p []byte) (int, error) {
+	addVaryAcceptEncoding(v.Header())
+	return v.ResponseWriter.Write(p)
 }
 
 // addVaryAcceptEncoding preserves existing Vary fields, treating tokens case-insensitively.
