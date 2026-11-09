@@ -15,8 +15,8 @@ func gzipped(h http.HandlerFunc) http.HandlerFunc {
 			h(w, r)
 			return
 		}
-		vw := &varyWriter{ResponseWriter: w}
-		defer addVaryAcceptEncoding(vw.Header())
+		vw := newVaryWriter(w)
+		defer addVaryAcceptEncoding(w.Header())
 		if !acceptsGzip(r) {
 			h(vw, r)
 			return
@@ -33,6 +33,8 @@ type varyWriter struct {
 	http.ResponseWriter
 }
 
+func (v *varyWriter) Unwrap() http.ResponseWriter { return v.ResponseWriter }
+
 func (v *varyWriter) WriteHeader(code int) {
 	addVaryAcceptEncoding(v.Header())
 	v.ResponseWriter.WriteHeader(code)
@@ -41,6 +43,25 @@ func (v *varyWriter) WriteHeader(code int) {
 func (v *varyWriter) Write(p []byte) (int, error) {
 	addVaryAcceptEncoding(v.Header())
 	return v.ResponseWriter.Write(p)
+}
+
+// Only advertise Flusher when the original writer supports it.
+// Flush must also commit Vary before emitting response headers.
+type varyFlushWriter struct {
+	*varyWriter
+}
+
+func (v *varyFlushWriter) Flush() {
+	addVaryAcceptEncoding(v.Header())
+	v.ResponseWriter.(http.Flusher).Flush()
+}
+
+func newVaryWriter(w http.ResponseWriter) http.ResponseWriter {
+	v := &varyWriter{ResponseWriter: w}
+	if _, ok := w.(http.Flusher); ok {
+		return &varyFlushWriter{varyWriter: v}
+	}
+	return v
 }
 
 // addVaryAcceptEncoding preserves existing Vary fields, treating tokens case-insensitively.
